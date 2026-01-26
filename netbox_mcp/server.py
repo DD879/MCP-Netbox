@@ -40,6 +40,16 @@ from typing import Dict, List, Optional, Any
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# === MCP SDK Environment Variable Bridge ===
+# The MCP SDK reads MCP_ALLOWED_HOSTS for host validation
+# Bridge NETBOX_MCP_ALLOWED_HOSTS to MCP_ALLOWED_HOSTS for consistency
+_allowed_hosts = os.getenv('MCP_ALLOWED_HOSTS') or os.getenv('NETBOX_MCP_ALLOWED_HOSTS')
+if _allowed_hosts:
+    os.environ['MCP_ALLOWED_HOSTS'] = _allowed_hosts
+    logger.info(f"MCP_ALLOWED_HOSTS configured: {_allowed_hosts}")
+else:
+    logger.warning("MCP_ALLOWED_HOSTS not set - host validation may reject requests")
+
 # 🧠 ULTRATHINK DEBUG: Initialize monitoring
 log_startup("Debug monitor initialized - starting server diagnostics")
 

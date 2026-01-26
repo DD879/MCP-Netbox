@@ -9,19 +9,15 @@ Version: 0.9.7 - Hierarchical Architecture with Registry Bridge
 """
 
 from mcp.server.fastmcp import FastMCP
-from fastapi import FastAPI, Depends, HTTPException
-from pydantic import BaseModel
 from .client import NetBoxClient
 from .config import load_config
 from .registry import (
     TOOL_REGISTRY, PROMPT_REGISTRY, 
-    load_tools, load_prompts, 
-    serialize_registry_for_api, serialize_prompts_for_api,
-    execute_tool, execute_prompt
+    load_tools, load_prompts
 )
-from .dependencies import NetBoxClientManager, get_netbox_client  # Use new dependency system
-from .monitoring import get_performance_monitor, MetricsCollector, HealthCheck, MetricsDashboard
-from .openapi_generator import OpenAPIGenerator, generate_api_documentation
+from .dependencies import NetBoxClientManager  # Singleton pattern for client management
+from .monitoring import get_performance_monitor
+# OpenAPI generation available via MCP tools
 from .debug_monitor import get_monitor, log_startup, log_protocol_message, log_connection_event, log_error, log_performance, log_tool_call
 from ._version import get_cached_version
 import logging
@@ -40,15 +36,40 @@ from typing import Dict, List, Optional, Any
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# === MCP SDK Environment Variable Bridge ===
-# The MCP SDK reads MCP_ALLOWED_HOSTS for host validation
-# Bridge NETBOX_MCP_ALLOWED_HOSTS to MCP_ALLOWED_HOSTS for consistency
-_allowed_hosts = os.getenv('MCP_ALLOWED_HOSTS') or os.getenv('NETBOX_MCP_ALLOWED_HOSTS')
-if _allowed_hosts:
-    os.environ['MCP_ALLOWED_HOSTS'] = _allowed_hosts
-    logger.info(f"MCP_ALLOWED_HOSTS configured: {_allowed_hosts}")
-else:
-    logger.warning("MCP_ALLOWED_HOSTS not set - host validation may reject requests")
+
+class HostOverrideMiddleware:
+    """ASGI Middleware to override Host header for DNS rebinding protection bypass.
+    
+    This middleware modifies the Host header to a value that matches the
+    server's allowed hosts list, effectively bypassing DNS rebinding protection
+    when running behind proxies or in Docker with custom hostnames.
+    """
+    
+    def __init__(self, app, target_host: str = "127.0.0.1:8000"):
+        self.app = app
+        self.target_host = target_host
+        
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            # Get the original host for logging
+            headers = dict(scope.get("headers", []))
+            original_host = headers.get(b"host", b"unknown").decode("utf-8", errors="replace")
+            
+            # Override Host header to bypass DNS rebinding protection
+            new_headers = []
+            for name, value in scope.get("headers", []):
+                if name == b"host":
+                    new_headers.append((b"host", self.target_host.encode("utf-8")))
+                else:
+                    new_headers.append((name, value))
+            
+            # Create new scope with modified headers
+            scope = dict(scope)
+            scope["headers"] = new_headers
+            
+            logger.debug(f"Host header override: {original_host} -> {self.target_host}")
+        
+        await self.app(scope, receive, send)
 
 # 🧠 ULTRATHINK DEBUG: Initialize monitoring
 log_startup("Debug monitor initialized - starting server diagnostics")
@@ -149,7 +170,7 @@ def bridge_tools_to_fastmcp(mcp_instance: FastMCP):
                             final_kwargs.update(kwargs)
                             # ----------------------------------------
 
-                            client = get_netbox_client()
+                            client = NetBoxClientManager.get_client()
 
                             # Call the original function with clean, deduplicated arguments.
                             return original_func(client, **final_kwargs)
@@ -260,520 +281,10 @@ def create_mcp_server(config) -> FastMCP:
     log_startup("FastMCP server instance created successfully")
     return mcp_instance
 
-# === FASTAPI SELF-DESCRIBING ENDPOINTS ===
-
-# Initialize FastAPI server for self-describing endpoints
-api_app = FastAPI(
-    title="NetBox MCP API",
-    description="Self-describing REST API for NetBox Management & Control Plane",
-    version="0.9.7"
-)
-
-# Pydantic models for API requests
-class ExecutionRequest(BaseModel):
-    tool_name: str
-    parameters: Dict[str, Any] = {}
-
-class ToolFilter(BaseModel):
-    category: Optional[str] = None
-    name_pattern: Optional[str] = None
-
-@api_app.get("/api/v1/tools", response_model=List[Dict[str, Any]])
-async def get_tools(
-    category: Optional[str] = None,
-    name_pattern: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """
-    Discovery endpoint: List all available MCP tools.
-
-    Query Parameters:
-        category: Filter tools by category (system, ipam, dcim, etc.)
-        name_pattern: Filter tools by name pattern (partial match)
-
-    Returns:
-        List of tool metadata with parameters, descriptions, and categories
-    """
-    try:
-        tools = serialize_registry_for_api()
-
-        # Apply filters
-        if category:
-            tools = [tool for tool in tools if tool.get("category") == category]
-
-        if name_pattern:
-            tools = [tool for tool in tools if name_pattern.lower() in tool.get("name", "").lower()]
-
-        logger.info(f"Tools discovery request: {len(tools)} tools returned (category={category}, pattern={name_pattern})")
-        return tools
-
-    except Exception as e:
-        logger.error(f"Error in tools discovery: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-
-@api_app.post("/api/v1/execute")
-async def execute_mcp_tool(
-    request: ExecutionRequest,
-    client: NetBoxClient = Depends(get_netbox_client)
-) -> Dict[str, Any]:
-    """
-    Generic execution endpoint: Execute any registered MCP tool.
-
-    Request Body:
-        tool_name: Name of the tool to execute
-        parameters: Dictionary of tool parameters
-
-    Returns:
-        Tool execution result
-    """
-    try:
-        logger.info(f"Executing tool: {request.tool_name} with parameters: {request.parameters}")
-
-        # Execute tool with dependency injection
-        result = execute_tool(request.tool_name, client, **request.parameters)
-
-        return {
-            "success": True,
-            "tool_name": request.tool_name,
-            "result": result
-        }
-
-    except ValueError as e:
-        # Tool not found
-        logger.warning(f"Tool not found: {request.tool_name}")
-        raise HTTPException(status_code=404, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Tool execution failed for {request.tool_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Tool execution failed: {str(e)}")
-
-
-# === PROMPT ENDPOINTS ===
-
-class PromptRequest(BaseModel):
-    prompt_name: str
-    arguments: Dict[str, Any] = {}
-
-@api_app.get("/api/v1/prompts", response_model=List[Dict[str, Any]])
-async def get_prompts() -> List[Dict[str, Any]]:
-    """
-    Discovery endpoint: List all available MCP prompts.
-
-    Returns:
-        List of prompt metadata with descriptions and usage information
-    """
-    try:
-        prompts = serialize_prompts_for_api()
-        logger.info(f"Prompts discovery request: {len(prompts)} prompts returned")
-        return prompts
-
-    except Exception as e:
-        logger.error(f"Error in prompts discovery: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-
-@api_app.post("/api/v1/prompts/execute")
-async def execute_mcp_prompt(request: PromptRequest) -> Dict[str, Any]:
-    """
-    Generic prompt execution endpoint: Execute any registered MCP prompt.
-
-    Request Body:
-        prompt_name: Name of the prompt to execute
-        arguments: Dictionary of prompt arguments (optional)
-
-    Returns:
-        Prompt execution result
-    """
-    try:
-        logger.info(f"Executing prompt: {request.prompt_name} with arguments: {request.arguments}")
-
-        # Execute prompt
-        result = await execute_prompt(request.prompt_name, **request.arguments)
-
-        return {
-            "success": True,
-            "prompt_name": request.prompt_name,
-            "result": result
-        }
-
-    except ValueError as e:
-        # Prompt not found
-        logger.warning(f"Prompt not found: {request.prompt_name}")
-        raise HTTPException(status_code=404, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Prompt execution failed for {request.prompt_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Prompt execution failed: {str(e)}")
-
-
-# === MONITORING ENDPOINTS ===
-
-# Initialize monitoring components
-performance_monitor = get_performance_monitor()
-metrics_collector = MetricsCollector(performance_monitor)
-health_check = HealthCheck(performance_monitor)
-metrics_dashboard = MetricsDashboard(metrics_collector)
-
-@api_app.get("/api/v1/metrics")
-async def get_performance_metrics() -> Dict[str, Any]:
-    """
-    Get performance metrics and dashboard data.
-    
-    Returns:
-        Complete performance metrics including operations, cache, and system stats
-    """
-    try:
-        dashboard_data = metrics_dashboard.get_dashboard_data()
-        return dashboard_data
-    except Exception as e:
-        logger.error(f"Error getting performance metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Metrics error: {str(e)}")
-
-
-@api_app.get("/api/v1/health/detailed")
-async def get_detailed_health() -> Dict[str, Any]:
-    """
-    Get detailed health status including performance metrics.
-    
-    Returns:
-        Comprehensive health status with all checks and metrics
-    """
-    try:
-        # Set NetBox client for health check
-        health_check.netbox_client = get_netbox_client()
-        
-        # Get health status
-        health_status = health_check.get_health_status()
-        
-        # Add active alerts
-        alerts = metrics_dashboard.get_active_alerts()
-        health_status["active_alerts"] = alerts
-        
-        return health_status
-    except Exception as e:
-        logger.error(f"Error getting detailed health: {e}")
-        raise HTTPException(status_code=500, detail=f"Health check error: {str(e)}")
-
-
-@api_app.get("/api/v1/metrics/operations/{operation_name}")
-async def get_operation_metrics(operation_name: str) -> Dict[str, Any]:
-    """
-    Get metrics for a specific operation.
-    
-    Args:
-        operation_name: Name of the operation to get metrics for
-    
-    Returns:
-        Operation-specific metrics and statistics
-    """
-    try:
-        # Get operation statistics
-        stats = performance_monitor.get_operation_statistics(operation_name)
-        
-        if not stats or stats.get("total_operations", 0) == 0:
-            raise HTTPException(status_code=404, detail=f"No metrics found for operation '{operation_name}'")
-        
-        # Get operation history
-        history = performance_monitor.get_operation_history(operation_name)
-        recent_history = history[-10:]  # Last 10 executions
-        
-        return {
-            "operation_name": operation_name,
-            "statistics": stats,
-            "recent_history": [
-                {
-                    "timestamp": metric.timestamp.isoformat(),
-                    "duration": metric.duration,
-                    "success": metric.success,
-                    "error_details": metric.error_details
-                }
-                for metric in recent_history
-            ]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting operation metrics for {operation_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Operation metrics error: {str(e)}")
-
-
-@api_app.get("/api/v1/metrics/export")
-async def export_metrics(format: str = "json") -> Dict[str, Any]:
-    """
-    Export all metrics data.
-    
-    Args:
-        format: Export format (json or csv)
-    
-    Returns:
-        Exported metrics data
-    """
-    try:
-        if format.lower() == "csv":
-            csv_data = metrics_dashboard.export_data(format="csv")
-            return {
-                "format": "csv",
-                "data": csv_data,
-                "content_type": "text/csv"
-            }
-        else:
-            json_data = metrics_dashboard.export_data(format="json")
-            return {
-                "format": "json",
-                "data": json_data,
-                "content_type": "application/json"
-            }
-    except Exception as e:
-        logger.error(f"Error exporting metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Metrics export error: {str(e)}")
-
-
-# === API DOCUMENTATION ENDPOINTS ===
-
-@api_app.get("/api/v1/openapi.json")
-async def get_openapi_spec() -> Dict[str, Any]:
-    """
-    Get OpenAPI 3.0 specification for all NetBox MCP tools.
-    
-    Returns:
-        OpenAPI specification as JSON
-    """
-    try:
-        from .openapi_generator import OpenAPIConfig
-        
-        config = OpenAPIConfig(
-            title="NetBox MCP Server API",
-            description="Production-ready Model Context Protocol server for NetBox automation with 142+ enterprise-grade tools",
-            version=get_cached_version(),
-            server_url="http://localhost:8000"
-        )
-        
-        generator = OpenAPIGenerator(config)
-        spec = generator.generate_spec()
-        
-        return spec
-    except Exception as e:
-        logger.error(f"Error generating OpenAPI spec: {e}")
-        raise HTTPException(status_code=500, detail=f"OpenAPI generation error: {str(e)}")
-
-
-@api_app.get("/api/v1/openapi.yaml")
-async def get_openapi_spec_yaml() -> str:
-    """
-    Get OpenAPI 3.0 specification as YAML.
-    
-    Returns:
-        OpenAPI specification as YAML string
-    """
-    try:
-        from .openapi_generator import OpenAPIConfig
-        import yaml
-        
-        config = OpenAPIConfig(
-            title="NetBox MCP Server API",
-            description="Production-ready Model Context Protocol server for NetBox automation with 142+ enterprise-grade tools",
-            version=get_cached_version(),
-            server_url="http://localhost:8000"
-        )
-        
-        generator = OpenAPIGenerator(config)
-        spec = generator.generate_spec()
-        
-        yaml_content = yaml.dump(spec, default_flow_style=False, sort_keys=False)
-        
-        # Return as plain text with correct content type
-        from fastapi import Response
-        return Response(content=yaml_content, media_type="application/x-yaml")
-    except Exception as e:
-        logger.error(f"Error generating OpenAPI YAML: {e}")
-        raise HTTPException(status_code=500, detail=f"OpenAPI YAML generation error: {str(e)}")
-
-
-@api_app.get("/api/v1/postman")
-async def get_postman_collection() -> Dict[str, Any]:
-    """
-    Get Postman collection for all NetBox MCP tools.
-    
-    Returns:
-        Postman collection JSON
-    """
-    try:
-        from .openapi_generator import OpenAPIConfig
-        
-        config = OpenAPIConfig(
-            title="NetBox MCP Server API",
-            version=get_cached_version(),
-            server_url="http://localhost:8000"
-        )
-        
-        generator = OpenAPIGenerator(config)
-        collection = generator.generate_postman_collection()
-        
-        return collection
-    except Exception as e:
-        logger.error(f"Error generating Postman collection: {e}")
-        raise HTTPException(status_code=500, detail=f"Postman collection error: {str(e)}")
-
-
-# === CONTEXT MANAGEMENT ENDPOINTS ===
-
-@api_app.get("/api/v1/context/status")
-async def get_context_status(
-    _client: NetBoxClient = Depends(get_netbox_client)
-) -> Dict[str, Any]:
-    """
-    Get current auto-context status and configuration.
-    
-    Returns:
-        Context status including environment detection and safety level
-    """
-    # Client parameter required by FastAPI dependency injection but not used in this endpoint
-    _ = _client  # Suppress unused parameter warning
-    
-    try:
-        from .persona import get_context_manager
-        
-        context_manager = get_context_manager()
-        context_state = context_manager.get_context_state()
-        
-        if context_state:
-            return {
-                "context_initialized": True,
-                "environment": context_state.environment,
-                "safety_level": context_state.safety_level,
-                "instance_type": context_state.instance_type,
-                "initialization_time": context_state.initialization_time.isoformat(),
-                "netbox_url": context_state.netbox_url,
-                "netbox_version": context_state.netbox_version,
-                "auto_context_enabled": context_state.auto_context_enabled,
-                "user_preferences": context_state.user_preferences
-            }
-        else:
-            return {
-                "context_initialized": False,
-                "auto_context_enabled": os.getenv('NETBOX_AUTO_CONTEXT', 'true').lower() == 'true',
-                "environment_override": os.getenv('NETBOX_ENVIRONMENT'),
-                "safety_level_override": os.getenv('NETBOX_SAFETY_LEVEL')
-            }
-            
-    except Exception as e:
-        logger.error(f"Error getting context status: {e}")
-        raise HTTPException(status_code=500, detail=f"Context status error: {str(e)}")
-
-
-@api_app.post("/api/v1/context/initialize")
-async def initialize_context(
-    client: NetBoxClient = Depends(get_netbox_client)
-) -> Dict[str, Any]:
-    """
-    Manually initialize Bridget auto-context system.
-    
-    Returns:
-        Context initialization result
-    """
-    try:
-        from .persona import get_context_manager
-        
-        context_manager = get_context_manager()
-        
-        # Reset context if already initialized
-        if context_manager.is_context_initialized():
-            context_manager.reset_context()
-        
-        # Initialize context
-        context_state = context_manager.initialize_context(client)
-        context_message = context_manager.generate_context_message(context_state)
-        
-        return {
-            "success": True,
-            "message": "Context initialized successfully",
-            "context": {
-                "environment": context_state.environment,
-                "safety_level": context_state.safety_level,
-                "instance_type": context_state.instance_type,
-                "initialization_time": context_state.initialization_time.isoformat()
-            },
-            "bridget_message": context_message
-        }
-        
-    except Exception as e:
-        logger.error(f"Error initializing context: {e}")
-        raise HTTPException(status_code=500, detail=f"Context initialization failed: {str(e)}")
-
-
-@api_app.post("/api/v1/context/reset")
-async def reset_context() -> Dict[str, Any]:
-    """
-    Reset the auto-context system state.
-    
-    Returns:
-        Reset operation result
-    """
-    try:
-        from .registry import reset_context_state
-        
-        reset_context_state()
-        
-        return {
-            "success": True,
-            "message": "Context state reset successfully"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error resetting context: {e}")
-        raise HTTPException(status_code=500, detail=f"Context reset failed: {str(e)}")
-
-
-@api_app.get("/api/v1/status")
-async def get_system_status(
-    client: NetBoxClient = Depends(get_netbox_client)
-) -> Dict[str, Any]:
-    """
-    Health/Status endpoint: Get MCP system status and NetBox connectivity.
-
-    Returns:
-        System status including NetBox connection, tool registry stats, and performance metrics
-    """
-    try:
-        # Get NetBox health status
-        netbox_status = client.health_check()
-
-        # Get tool registry statistics
-        from .registry import get_registry_stats
-        registry_stats = get_registry_stats()
-
-        # Get client status
-        from .dependencies import get_client_status
-        client_status = get_client_status()
-
-        return {
-            "service": "NetBox MCP",
-            "version": "0.9.7",
-            "status": "healthy" if netbox_status.connected else "degraded",
-            "netbox": {
-                "connected": netbox_status.connected,
-                "version": netbox_status.version,
-                "python_version": netbox_status.python_version,
-                "django_version": netbox_status.django_version,
-                "response_time_ms": netbox_status.response_time_ms,
-                "plugins": netbox_status.plugins
-            },
-            "tool_registry": registry_stats,
-            "client": client_status,
-            "cache_stats": netbox_status.cache_stats if hasattr(netbox_status, 'cache_stats') else None
-        }
-
-    except Exception as e:
-        logger.error(f"Status check failed: {e}")
-        return {
-            "service": "NetBox MCP",
-            "version": "0.9.7",
-            "status": "error",
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
 
 # === HTTP HEALTH CHECK SERVER ===
+# Note: FastAPI REST endpoints were removed - all functionality is exposed via MCP protocol
+# n8n and other MCP clients should use tools/list, tools/call, prompts/list, etc.
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     """HTTP handler for health check endpoints."""
@@ -1052,12 +563,14 @@ def main():
         if hasattr(mcp, 'streamable_http_app'):
             try:
                 logger.info("Creating ASGI app with FastMCP.streamable_http_app()")
-                asgi_app = mcp.streamable_http_app(path=mcp_path)
-                logger.info(f"Streamable HTTP app created successfully at path: {mcp_path}")
-            except TypeError:
-                # Try without path argument
-                asgi_app = mcp.streamable_http_app()
-                logger.info("Streamable HTTP app created (without path argument)")
+                try:
+                    asgi_app = mcp.streamable_http_app(path=mcp_path)
+                    logger.info(f"Streamable HTTP app created at path: {mcp_path}")
+                except TypeError:
+                    asgi_app = mcp.streamable_http_app()
+                    logger.info("Streamable HTTP app created (no arguments)")
+            except TypeError as e:
+                logger.warning(f"streamable_http_app() failed: {e}")
         
         # Method 2: Try http_app() (some MCP versions)
         if asgi_app is None and hasattr(mcp, 'http_app'):
@@ -1089,6 +602,13 @@ def main():
         
         # Start the server
         if asgi_app is not None:
+            # Apply HostOverrideMiddleware if we're binding to 0.0.0.0 (Docker/remote scenario)
+            # This bypasses DNS rebinding protection by rewriting Host header to localhost
+            if mcp_host == "0.0.0.0":
+                target_host = f"127.0.0.1:{mcp_port}"
+                logger.info(f"Applying HostOverrideMiddleware: rewriting Host headers to {target_host}")
+                asgi_app = HostOverrideMiddleware(asgi_app, target_host=target_host)
+            
             logger.info(f"🚀 Starting uvicorn server on {mcp_host}:{mcp_port}")
             logger.info(f"📡 MCP Streamable HTTP endpoint ready at: {mcp_url}")
             

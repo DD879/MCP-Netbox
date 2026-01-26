@@ -104,7 +104,7 @@ test_*.py
 # Test outputs and debug files
 test_outputs/
 *.json
-debug_*.py
+# debug_*.py
 setup_test_data.py
 autonomous_*.sh
 autonomous_*.txt

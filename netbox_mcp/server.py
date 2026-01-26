@@ -1016,37 +1016,96 @@ def main():
 
         # === HTTP transports (Streamable HTTP / SSE) ===
         logger.info(f"Starting NetBox MCP server on {transport} transport...")
-        mcp_url = f"http://{config.mcp_host}:{config.mcp_port}{config.mcp_path}"
+        mcp_host = getattr(config, "mcp_host", "0.0.0.0")
+        mcp_port = getattr(config, "mcp_port", 8000)
+        mcp_path = getattr(config, "mcp_path", "/mcp")
+        
+        mcp_url = f"http://{mcp_host}:{mcp_port}{mcp_path}"
         logger.info(f"MCP endpoint: {mcp_url}")
         if getattr(config, "enable_health_server", False):
             logger.info(f"Health endpoints: http://0.0.0.0:{config.health_check_port}/healthz")
 
-        # IMPORTANT: For HTTP transports, run in the main thread (uvicorn installs signal handlers).
-        run_kwargs = {
-            "transport": transport,
-            "host": config.mcp_host,
-            "port": config.mcp_port,
-        }
-
-        # Prefer explicit path if supported by the underlying FastMCP implementation
+        # Log MCP library version for debugging
         try:
-            mcp.run(**run_kwargs, path=config.mcp_path)
-        except TypeError:
-            # Older FastMCP versions may not support the 'path' kwarg
-            mcp.run(**run_kwargs)
-        except Exception as e:
-            # Compatibility fallback: some implementations use transport="http"
-            if transport == "streamable-http":
-                logger.warning(f"Failed to start with transport='streamable-http' ({e}); retrying with transport='http' for compatibility")
+            import mcp as mcp_module
+            mcp_version = getattr(mcp_module, '__version__', 'unknown')
+            logger.info(f"MCP library version: {mcp_version}")
+        except Exception:
+            logger.warning("Could not determine MCP library version")
+
+        # For streamable-http transport, use the appropriate method based on MCP version
+        import uvicorn
+        
+        asgi_app = None
+        
+        # Method 1: Try streamable_http_app() (MCP >= 1.9.0)
+        if hasattr(mcp, 'streamable_http_app'):
+            try:
+                logger.info("Creating ASGI app with FastMCP.streamable_http_app()")
+                asgi_app = mcp.streamable_http_app(path=mcp_path)
+                logger.info(f"Streamable HTTP app created successfully at path: {mcp_path}")
+            except TypeError:
+                # Try without path argument
+                asgi_app = mcp.streamable_http_app()
+                logger.info("Streamable HTTP app created (without path argument)")
+        
+        # Method 2: Try http_app() (some MCP versions)
+        if asgi_app is None and hasattr(mcp, 'http_app'):
+            try:
+                logger.info("Creating ASGI app with FastMCP.http_app()")
+                asgi_app = mcp.http_app(path=mcp_path)
+            except TypeError:
+                asgi_app = mcp.http_app()
+            logger.info("HTTP app created successfully")
+        
+        # Method 3: Try sse_app() as fallback
+        if asgi_app is None and hasattr(mcp, 'sse_app'):
+            try:
+                logger.info("Creating ASGI app with FastMCP.sse_app() (fallback)")
+                asgi_app = mcp.sse_app(path=mcp_path)
+            except TypeError:
+                asgi_app = mcp.sse_app()
+            logger.info("SSE app created as fallback")
+        
+        # Method 4: Check for direct app attributes
+        if asgi_app is None:
+            for attr in ['asgi_app', 'app', '_app', '_asgi_app']:
+                if hasattr(mcp, attr):
+                    asgi_app = getattr(mcp, attr)
+                    if callable(asgi_app) and not hasattr(asgi_app, '__call__'):
+                        asgi_app = asgi_app()
+                    logger.info(f"Using FastMCP.{attr} as ASGI app")
+                    break
+        
+        # Start the server
+        if asgi_app is not None:
+            logger.info(f"🚀 Starting uvicorn server on {mcp_host}:{mcp_port}")
+            logger.info(f"📡 MCP Streamable HTTP endpoint ready at: {mcp_url}")
+            
+            uvicorn.run(
+                asgi_app,
+                host=mcp_host,
+                port=mcp_port,
+                log_level="info",
+                access_log=True
+            )
+        else:
+            # Last resort: try mcp.run() with transport argument
+            logger.warning("Could not create ASGI app, trying mcp.run() directly...")
+            try:
+                # Try with all parameters
+                mcp.run(transport="streamable-http", host=mcp_host, port=mcp_port)
+            except TypeError:
                 try:
-                    mcp.run(host=config.mcp_host, port=config.mcp_port, path=config.mcp_path, transport="http")
+                    # Try with just transport
+                    mcp.run(transport="streamable-http")
                 except TypeError:
-                    mcp.run(host=config.mcp_host, port=config.mcp_port, transport="http")
-            else:
-                raise
+                    # Try without any arguments (stdio fallback)
+                    logger.error("Failed to start HTTP transport, falling back to stdio")
+                    mcp.run()
 
     except Exception as e:
-        logger.error(f"NetBox MCP server error: {e}")
+        logger.error(f"NetBox MCP server error: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

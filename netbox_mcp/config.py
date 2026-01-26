@@ -171,7 +171,7 @@ class NetBoxConfig:
     # - "http": alias for streamable-http (supported by some clients/tools)
     # - "sse": legacy HTTP transport (avoid for new deployments)
     mcp_transport: str = "stdio"
-    mcp_host: str = "127.0.0.1"
+    mcp_host: str = "0.0.0.0"  # Use 0.0.0.0 to bind to all interfaces (required for Docker)
     mcp_port: int = 8000
     mcp_path: str = "/mcp"
 

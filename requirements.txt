@@ -1,0 +1,8 @@
+# NetBox MCP Server Dependencies
+# 
+# This project uses pyproject.toml as the primary dependency specification.
+# Install with: pip install -e .
+# For development: pip install -e .[dev]
+#
+# Direct installation (not recommended for development):
+-e .

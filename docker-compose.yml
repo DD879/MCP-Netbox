@@ -1,0 +1,59 @@
+services:
+  netbox-mcp:
+    build: .
+    image: netbox-mcp-server:latest
+    container_name: netbox-mcp-server
+    
+    # Environment variables (can be overridden with .env file)
+    environment:
+      - NETBOX_URL=${NETBOX_URL:-https://netbox.example.com}
+      - NETBOX_TOKEN=${NETBOX_TOKEN:-your-token-here}
+      - NETBOX_LOG_LEVEL=${NETBOX_LOG_LEVEL:-INFO}
+      - NETBOX_MCP_TRANSPORT=${NETBOX_MCP_TRANSPORT:-streamable-http}
+      - NETBOX_MCP_HOST=${NETBOX_MCP_HOST:-0.0.0.0}
+      - NETBOX_MCP_PORT=${NETBOX_MCP_PORT:-8000}
+      - NETBOX_MCP_PATH=${NETBOX_MCP_PATH:-/mcp}
+      - NETBOX_ENABLE_HEALTH_SERVER=${NETBOX_ENABLE_HEALTH_SERVER:-true}
+      - NETBOX_HEALTH_CHECK_PORT=${NETBOX_HEALTH_CHECK_PORT:-8080}
+      - NETBOX_DRY_RUN=${NETBOX_DRY_RUN:-false}
+    
+    # Port mapping (optional, mainly for health check access)
+    ports:
+      - "8000:8000"  # MCP Streamable HTTP
+      - "8080:8080"  # Health endpoints
+    
+    # Health check configuration (using readiness probe)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Example with custom network
+  # networks:
+  #   - netbox-network
+
+# networks:
+#   netbox-network:
+#     driver: bridge

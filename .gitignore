@@ -1,0 +1,117 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+*.log
+*.pid
+.netbox-mcp.toml
+netbox-mcp.toml
+netbox-mcp.yaml
+.netbox-mcp.yaml
+
+# Credentials and sensitive files
+netbox-credentials.env
+.credentials
+secrets/
+config/local.py
+config/secrets.py
+
+# Docker
+.dockerignore
+
+# Cache and temporary files
+.cache/
+tmp/
+temp/
+
+# Development and testing files
+ask-gemini.md
+answer-from-gemini.md
+demo_*.py
+test_*.py
+*_demo.py
+*_test.py
+
+# Test outputs and debug files
+test_outputs/
+*.json
+debug_*.py
+setup_test_data.py
+autonomous_*.sh
+autonomous_*.txt
+autonomous_logs/
+
+# Test scripts for development and debugging
+test_scripts/
+
+# Documentation drafts and temporary files
+docs/CLAUDE.md

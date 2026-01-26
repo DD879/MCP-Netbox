@@ -1,0 +1,78 @@
+# NetBox MCP Server Configuration (YAML)
+# Copy this file to netbox-mcp.yaml and configure your settings
+
+# NetBox connection settings (REQUIRED)
+url: "https://your-netbox-instance.com"
+token: "your-api-token-here"
+
+# Connection settings
+timeout: 30
+verify_ssl: true
+
+# Server settings
+log_level: "INFO"
+health_check_port: 8080
+
+# MCP transport settings
+mcp_transport: "stdio"               # "stdio" or "streamable-http"
+mcp_host: "127.0.0.1"                # Bind address for HTTP transport
+mcp_port: 8000                       # Bind port for HTTP transport
+mcp_path: "/mcp"                     # MCP base path
+mcp_stateless_http: false            # Optional: stateless HTTP sessions
+mcp_json_response: false             # Optional: force JSON responses (no SSE)
+
+
+# Safety configuration (CRITICAL for write operations)
+safety:
+  # Global safety controls
+  dry_run_mode: false                    # Set to true to prevent actual writes
+  require_confirmation: true             # Require confirm=True for write operations
+  enable_write_operations: true          # Master switch for all write operations
+  
+  # Operation limits
+  write_timeout: 60                      # Timeout for write operations (seconds)
+  max_batch_size: 100                    # Maximum objects per batch operation
+  
+  # Audit and logging
+  audit_all_operations: true             # Log all operations (read/write)
+  audit_write_details: true              # Detailed logging for write operations
+  
+  # Rollback and recovery
+  enable_transaction_mode: true          # Enable transaction-like operations
+  auto_rollback_on_error: true           # Auto-rollback on partial failures
+
+# Performance settings
+default_page_size: 50
+max_results: 1000
+
+# Feature flags
+enable_health_server: true
+enable_degraded_mode: true
+enable_read_operations: true
+
+# Cache configuration (optional)
+cache:
+  enabled: true
+  backend: "memory"                      # 'memory' or 'disk'
+  size_limit_mb: 200
+  max_items: 2000
+  enable_stats: true
+  
+  # TTL settings for different data types (seconds)
+  ttl:
+    devices: 300                         # Device data
+    sites: 3600                          # Site information  
+    manufacturers: 7200                  # Manufacturer data
+    device_types: 7200                   # Device types
+    device_roles: 7200                   # Device roles
+    ip_addresses: 600                    # IP address data
+    prefixes: 1800                       # Network prefixes
+    vlans: 1800                          # VLAN information
+    status: 60                           # Status information
+    default: 300                         # Default TTL
+
+# Custom headers (optional)
+custom_headers: {}
+
+# Integration settings (for future use)
+integration: {}

@@ -232,13 +232,9 @@ def create_mcp_server(config) -> FastMCP:
     """
     log_startup("Initializing FastMCP server instance")
 
-    # Create FastMCP instance with HTTP behavior settings from config
-    mcp_instance = FastMCP(
-        "NetBox Model-Context Protocol",
-        description="A powerful, tool-based interface to manage and orchestrate a NetBox instance.",
-        stateless_http=getattr(config, "mcp_stateless_http", False),
-        json_response=getattr(config, "mcp_json_response", False),
-    )
+    # Create FastMCP instance - only pass name as positional argument
+    # Note: Some FastMCP versions don't support description/stateless_http/json_response kwargs
+    mcp_instance = FastMCP("NetBox Model-Context Protocol")
 
     # Add protocol logging after FastMCP initialization
     log_startup("Adding MCP protocol logging interceptor")

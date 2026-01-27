@@ -30,11 +30,113 @@ import inspect
 from functools import wraps
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union, get_origin, get_args
 
 # Configure logging (will be updated from config)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def simplify_type_annotation(annotation) -> type:
+    """
+    Simplify complex type annotations to basic types for Google Gemini compatibility.
+    
+    Google Gemini's function calling API doesn't support JSON Schema with:
+    - Type arrays like ["string", "null"] 
+    - anyOf/oneOf constructs
+    - Complex nested types
+    
+    This function converts:
+    - Optional[X] -> X
+    - Union[X, None] -> X
+    - List[X] -> list
+    - Dict[X, Y] -> dict
+    
+    Args:
+        annotation: The type annotation to simplify
+        
+    Returns:
+        A simplified basic Python type
+    """
+    if annotation is None or annotation is type(None):
+        return str  # Default to string for None types
+    
+    origin = get_origin(annotation)
+    
+    # Handle Optional[X] which is Union[X, None]
+    if origin is Union:
+        args = get_args(annotation)
+        # Filter out NoneType
+        non_none_args = [arg for arg in args if arg is not type(None)]
+        if non_none_args:
+            # Recursively simplify the first non-None type
+            return simplify_type_annotation(non_none_args[0])
+        return str  # Fallback
+    
+    # Handle List[X] -> list
+    if origin is list:
+        return list
+    
+    # Handle Dict[X, Y] -> dict  
+    if origin is dict:
+        return dict
+    
+    # Handle basic types
+    if annotation in (str, int, float, bool, list, dict):
+        return annotation
+    
+    # Handle string representations
+    if isinstance(annotation, str):
+        type_map = {
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
+            'list': list,
+            'dict': dict,
+            'List': list,
+            'Dict': dict,
+        }
+        return type_map.get(annotation, str)
+    
+    # Default: return the annotation as-is if it's a basic type
+    try:
+        if isinstance(annotation, type):
+            return annotation
+    except TypeError:
+        pass
+    
+    return str  # Ultimate fallback
+
+
+def create_simplified_signature(func):
+    """
+    Create a new function signature with simplified type annotations.
+    
+    This ensures that when FastMCP generates JSON schemas for Google Gemini,
+    the schemas use simple types like "string" instead of ["string", "null"].
+    
+    Args:
+        func: The original function
+        
+    Returns:
+        A new Parameter list with simplified annotations
+    """
+    sig = inspect.signature(func)
+    new_params = []
+    
+    for param_name, param in sig.parameters.items():
+        if param_name == 'client':
+            continue  # Skip client parameter (injected)
+        
+        # Simplify the annotation
+        new_annotation = simplify_type_annotation(param.annotation)
+        
+        # Create new parameter with simplified type
+        new_param = param.replace(annotation=new_annotation)
+        new_params.append(new_param)
+    
+    return new_params
 
 
 class HostOverrideMiddleware:
@@ -130,6 +232,10 @@ def bridge_tools_to_fastmcp(mcp_instance: FastMCP):
     """
     Dynamically registers all tools from our internal TOOL_REGISTRY
     with the FastMCP instance, creating wrappers for dependency injection.
+    
+    IMPORTANT: This function simplifies type annotations to ensure compatibility
+    with Google Gemini's function calling API, which doesn't support complex
+    JSON Schema constructs like anyOf, oneOf, or type arrays.
     """
     bridged_count = 0
     for tool_name, tool_metadata in TOOL_REGISTRY.items():
@@ -138,14 +244,26 @@ def bridge_tools_to_fastmcp(mcp_instance: FastMCP):
             description = tool_metadata.get("description", f"Executes the {tool_name} tool.")
             category = tool_metadata.get("category", "General")
 
-            # Create a 'wrapper' that injects the client with EXACT function signature (Gemini's Fix)
+            # Create a 'wrapper' that injects the client with SIMPLIFIED type annotations
             def create_tool_wrapper(original_func):
                 """
-                Creates a tool wrapper that mimics the exact signature of the original function,
-                while automatically injecting the NetBox client and preventing argument duplicates.
+                Creates a tool wrapper that:
+                1. Mimics the exact signature of the original function
+                2. Automatically injects the NetBox client
+                3. Prevents argument duplicates
+                4. Uses SIMPLIFIED type annotations for Google Gemini compatibility
                 """
                 sig = inspect.signature(original_func)
-                wrapper_params = [p for p in sig.parameters.values() if p.name != 'client']
+                
+                # Create simplified parameters (excluding 'client', with simplified types)
+                wrapper_params = []
+                for p in sig.parameters.values():
+                    if p.name == 'client':
+                        continue
+                    # Simplify the type annotation for Gemini compatibility
+                    simplified_type = simplify_type_annotation(p.annotation)
+                    new_param = p.replace(annotation=simplified_type)
+                    wrapper_params.append(new_param)
 
                 @wraps(original_func)
                 def tool_wrapper(*args, **kwargs):

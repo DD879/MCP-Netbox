@@ -40,6 +40,9 @@ services:
       - NETBOX_MCP_HOST=${NETBOX_MCP_HOST:-0.0.0.0}
       - NETBOX_MCP_PORT=${NETBOX_MCP_PORT:-8000}
       - NETBOX_MCP_PATH=${NETBOX_MCP_PATH:-/mcp}
+      # Tool Profiles (for smaller LLMs like Ollama)
+      - NETBOX_TOOL_PROFILE=${NETBOX_TOOL_PROFILE:-essential}
+      - NETBOX_ENABLE_TOOL_PROFILES=${NETBOX_ENABLE_TOOL_PROFILES:-true}
     ports:
       - "8000:8000"  # MCP Streamable HTTP
       - "8080:8080"  # Health check endpoint
@@ -75,6 +78,9 @@ services:
       - NETBOX_MCP_HOST=${NETBOX_MCP_HOST:-0.0.0.0}
       - NETBOX_MCP_PORT=${NETBOX_MCP_PORT:-8000}
       - NETBOX_MCP_PATH=${NETBOX_MCP_PATH:-/mcp}
+      # Tool Profiles (for smaller LLMs like Ollama)
+      - NETBOX_TOOL_PROFILE=${NETBOX_TOOL_PROFILE:-essential}
+      - NETBOX_ENABLE_TOOL_PROFILES=${NETBOX_ENABLE_TOOL_PROFILES:-true}
     volumes:
       - ./config:/app/config:ro
       - logs:/app/logs

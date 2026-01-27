@@ -200,6 +200,11 @@ class NetBoxConfig:
     # Logging configuration
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     
+    # Tool Profile configuration (for smaller LLMs like Ollama)
+    # Available profiles: minimal, essential, ipam, dcim, readonly, write, full
+    tool_profile: str = "essential"           # Default to essential for best compatibility
+    enable_tool_profiles: bool = True         # Set to False to expose all tools
+    
     def __post_init__(self):
         """Validate configuration after initialization"""
         if not self.url:
@@ -426,8 +431,14 @@ class ConfigurationManager:
             'NETBOX_LOG_ENABLE_PERFORMANCE': ('logging.enable_performance_logging', cls._parse_bool),
         }
         
+        # Tool profile configuration mappings
+        profile_mappings = {
+            'NETBOX_TOOL_PROFILE': 'tool_profile',
+            'NETBOX_ENABLE_TOOL_PROFILES': ('enable_tool_profiles', cls._parse_bool),
+        }
+        
         # Combine all mappings
-        all_mappings = {**env_mappings, **safety_mappings, **cache_mappings, **logging_mappings}
+        all_mappings = {**env_mappings, **safety_mappings, **cache_mappings, **logging_mappings, **profile_mappings}
         
         for env_var, config_key in all_mappings.items():
             # Use secrets manager to get values (handles all sources)

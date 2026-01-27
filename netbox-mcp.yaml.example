@@ -21,6 +21,20 @@ mcp_path: "/mcp"                     # MCP base path
 mcp_stateless_http: false            # Optional: stateless HTTP sessions
 mcp_json_response: false             # Optional: force JSON responses (no SSE)
 
+# Tool Profile configuration (for smaller LLMs like Ollama/qwen2.5)
+# Available profiles:
+#   - minimal:   Only profile management tools (~5 tools)
+#   - essential: Basic operations - list, get, search (~25 tools) [RECOMMENDED]
+#   - ipam:      IP management - IPs, prefixes, VLANs (~35 tools)
+#   - dcim:      Infrastructure - devices, racks, cables (~50 tools)
+#   - readonly:  All read operations (~70 tools)
+#   - write:     Write operations - create, update, delete (~60 tools)
+#   - full:      All tools (142+) - use only with large models (14B+)
+tool_profile: "essential"            # Start with essential for best compatibility
+enable_tool_profiles: true           # Set to false to always expose all tools
+
+# Environment variable override: NETBOX_TOOL_PROFILE=ipam
+
 
 # Safety configuration (CRITICAL for write operations)
 safety:

@@ -17,6 +17,7 @@ from .registry import (
 )
 from .dependencies import NetBoxClientManager  # Singleton pattern for client management
 from .monitoring import get_performance_monitor
+from .tool_profiles import get_profile_manager, TOOL_PROFILES  # Dynamic tool profiles
 # OpenAPI generation available via MCP tools
 from .debug_monitor import get_monitor, log_startup, log_protocol_message, log_connection_event, log_error, log_performance, log_tool_call
 from ._version import get_cached_version
@@ -228,17 +229,43 @@ def add_mcp_protocol_logging(mcp_instance: FastMCP):
         log_error(f"Failed to add MCP protocol logging: {e}", e)
 
 # Step 3: The Registry Bridge function
-def bridge_tools_to_fastmcp(mcp_instance: FastMCP):
+def bridge_tools_to_fastmcp(mcp_instance: FastMCP, use_profiles: bool = True):
     """
-    Dynamically registers all tools from our internal TOOL_REGISTRY
+    Dynamically registers tools from our internal TOOL_REGISTRY
     with the FastMCP instance, creating wrappers for dependency injection.
     
-    IMPORTANT: This function simplifies type annotations to ensure compatibility
-    with Google Gemini's function calling API, which doesn't support complex
-    JSON Schema constructs like anyOf, oneOf, or type arrays.
+    IMPORTANT: This function:
+    1. Simplifies type annotations for Google Gemini/Ollama compatibility
+    2. Filters tools based on active profile (for smaller LLMs)
+    3. Always includes meta-tools for profile management
+    
+    Args:
+        mcp_instance: The FastMCP server instance
+        use_profiles: If True, filter tools based on active profile (default: True)
     """
+    # Initialize profile manager with full registry
+    profile_manager = get_profile_manager()
+    profile_manager.set_tool_registry(TOOL_REGISTRY)
+    
+    # Get initial profile from environment or config
+    initial_profile = os.getenv("NETBOX_TOOL_PROFILE", "essential")
+    if initial_profile not in TOOL_PROFILES:
+        logger.warning(f"Unknown profile '{initial_profile}', using 'essential'")
+        initial_profile = "essential"
+    
+    # Activate initial profile
+    profile_manager.activate_profile(initial_profile)
+    
+    # Get filtered registry based on profile
+    if use_profiles:
+        tools_to_bridge = profile_manager.get_filtered_registry()
+        logger.info(f"Using profile '{initial_profile}': {len(tools_to_bridge)}/{len(TOOL_REGISTRY)} tools")
+    else:
+        tools_to_bridge = TOOL_REGISTRY
+        logger.info(f"Profiles disabled: bridging all {len(TOOL_REGISTRY)} tools")
+    
     bridged_count = 0
-    for tool_name, tool_metadata in TOOL_REGISTRY.items():
+    for tool_name, tool_metadata in tools_to_bridge.items():
         try:
             original_func = tool_metadata["function"]
             description = tool_metadata.get("description", f"Executes the {tool_name} tool.")
@@ -312,8 +339,14 @@ def bridge_tools_to_fastmcp(mcp_instance: FastMCP):
         except Exception as e:
             logger.error(f"Failed to bridge tool '{tool_name}' to FastMCP: {e}", exc_info=True)
 
-    logger.info(f"Successfully bridged {bridged_count}/{len(TOOL_REGISTRY)} tools to the FastMCP interface")
-    log_startup(f"Tools bridged to FastMCP: {bridged_count}/{len(TOOL_REGISTRY)} successful")
+    # Log summary with profile info
+    active_profile = profile_manager.get_active_profile()
+    logger.info(f"Successfully bridged {bridged_count}/{len(tools_to_bridge)} tools (profile: {active_profile})")
+    log_startup(f"Tools bridged to FastMCP: {bridged_count} tools, profile: {active_profile}")
+    
+    # Log hint about profile management
+    if use_profiles and active_profile != "full":
+        logger.info(f"💡 Tip: Use netbox_profile_activate() to switch profiles or netbox_profile_list() to see all profiles")
 
 # Step 5: Bridge prompts to FastMCP
 def bridge_prompts_to_fastmcp(mcp_instance: FastMCP):
@@ -390,8 +423,10 @@ def create_mcp_server(config) -> FastMCP:
     add_mcp_protocol_logging(mcp_instance)
 
     # Bridge tools and prompts into FastMCP
-    log_startup("Bridging tools to FastMCP interface")
-    bridge_tools_to_fastmcp(mcp_instance)
+    # Use profile filtering if enabled in config
+    use_profiles = getattr(config, 'enable_tool_profiles', True)
+    log_startup(f"Bridging tools to FastMCP interface (profiles: {'enabled' if use_profiles else 'disabled'})")
+    bridge_tools_to_fastmcp(mcp_instance, use_profiles=use_profiles)
 
     log_startup("Bridging prompts to FastMCP interface")
     bridge_prompts_to_fastmcp(mcp_instance)

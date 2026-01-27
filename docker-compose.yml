@@ -16,6 +16,9 @@ services:
       - NETBOX_ENABLE_HEALTH_SERVER=${NETBOX_ENABLE_HEALTH_SERVER:-true}
       - NETBOX_HEALTH_CHECK_PORT=${NETBOX_HEALTH_CHECK_PORT:-8080}
       - NETBOX_DRY_RUN=${NETBOX_DRY_RUN:-false}
+      # Tool Profiles (for smaller LLMs like Ollama)
+      - NETBOX_TOOL_PROFILE=${NETBOX_TOOL_PROFILE:-essential}
+      - NETBOX_ENABLE_TOOL_PROFILES=${NETBOX_ENABLE_TOOL_PROFILES:-true}
     
     # Port mapping (optional, mainly for health check access)
     ports:

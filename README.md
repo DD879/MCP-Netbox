@@ -123,6 +123,51 @@ See the [Bridget Documentation](https://github.com/Deployment-Team/netbox-mcp/wi
 - `NETBOX_MCP_STATELESS_HTTP`: `true/false` (default: `false`)
 - `NETBOX_MCP_JSON_RESPONSE`: `true/false` (default: `false`)
 
+### 🎯 Tool Profiles (for Ollama & smaller LLMs)
+
+The server supports **dynamic tool profiles** to optimize context usage for smaller models like Ollama's qwen2.5:7b. Instead of overwhelming the model with 142+ tools, you can start with a focused subset.
+
+**Available Profiles**:
+
+| Profile | Tools | Description |
+|---------|-------|-------------|
+| `minimal` | ~5 | Only profile management meta-tools |
+| `essential` | ~25 | Basic operations: list, get, search (**default**) |
+| `ipam` | ~35 | IP management: IPs, prefixes, VLANs, VRFs |
+| `dcim` | ~50 | Infrastructure: devices, racks, cables |
+| `readonly` | ~70 | All read operations (safe exploration) |
+| `write` | ~60 | Write operations: create, update, delete |
+| `full` | 142+ | All tools (requires large models 14B+) |
+
+**Configuration**:
+```bash
+# Via environment variable
+NETBOX_TOOL_PROFILE=ipam
+
+# Via netbox-mcp.yaml
+tool_profile: "ipam"
+enable_tool_profiles: true
+```
+
+**Dynamic Profile Switching**:
+
+The AI model can switch profiles during conversation:
+```
+User: "I need to manage IP addresses"
+Model: → netbox_profile_activate(profile="ipam")
+       ✅ IPAM tools now available
+
+User: "List IPs in 10.0.0.0/24"  
+Model: → netbox_list_ip_addresses(prefix="10.0.0.0/24")
+```
+
+**Profile Meta-Tools** (always available):
+- `netbox_profile_list` - List available profiles
+- `netbox_profile_activate` - Switch to a profile
+- `netbox_profile_current` - Show active profile and tools
+- `netbox_tool_search` - Search for tools by name/description
+- `netbox_tool_help` - Usage guide
+
 **Advanced Configuration**: Use YAML/TOML configuration files or additional environment variables for enterprise features like secrets management and structured logging.
 
 ## 🔒 Safety & Enterprise Features

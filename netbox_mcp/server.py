@@ -174,6 +174,57 @@ class HostOverrideMiddleware:
         
         await self.app(scope, receive, send)
 
+
+class DebugMiddleware:
+    """ASGI Middleware to log all incoming requests for debugging 404 issues."""
+    
+    def __init__(self, app):
+        self.app = app
+        
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            method = scope.get("method", "?")
+            path = scope.get("path", "?")
+            logger.info(f"🔍 DEBUG: Incoming {method} {path}")
+            
+            # Log headers for debugging
+            headers = dict(scope.get("headers", []))
+            content_type = headers.get(b"content-type", b"none").decode("utf-8", errors="replace")
+            accept = headers.get(b"accept", b"none").decode("utf-8", errors="replace")
+            logger.debug(f"🔍 Headers: Content-Type={content_type}, Accept={accept}")
+            
+            # If it's a GET request to /mcp, return helpful info instead of 404
+            if method == "GET" and path in ("/mcp", "/mcp/"):
+                # Return helpful response for GET requests (not proper MCP protocol)
+                response_body = json.dumps({
+                    "error": "MCP Streamable HTTP requires POST requests",
+                    "help": {
+                        "protocol": "MCP Streamable HTTP",
+                        "method": "POST",
+                        "content_type": "application/json",
+                        "accept": "application/json, text/event-stream",
+                        "body": "JSON-RPC 2.0 message",
+                        "docs": "https://modelcontextprotocol.io/docs/concepts/transports"
+                    }
+                }, indent=2).encode("utf-8")
+                
+                await send({
+                    "type": "http.response.start",
+                    "status": 405,  # Method Not Allowed
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(response_body)).encode()),
+                        (b"allow", b"POST"),
+                    ]
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": response_body,
+                })
+                return
+        
+        await self.app(scope, receive, send)
+
 # 🧠 ULTRATHINK DEBUG: Initialize monitoring
 log_startup("Debug monitor initialized - starting server diagnostics")
 
@@ -716,13 +767,20 @@ def main():
         if hasattr(mcp, 'streamable_http_app'):
             try:
                 logger.info("Creating ASGI app with FastMCP.streamable_http_app()")
+                # Try with streamable_http_path (correct parameter name)
                 try:
-                    asgi_app = mcp.streamable_http_app(path=mcp_path)
-                    logger.info(f"Streamable HTTP app created at path: {mcp_path}")
+                    asgi_app = mcp.streamable_http_app(streamable_http_path=mcp_path)
+                    logger.info(f"Streamable HTTP app created with streamable_http_path: {mcp_path}")
                 except TypeError:
-                    asgi_app = mcp.streamable_http_app()
-                    logger.info("Streamable HTTP app created (no arguments)")
-            except TypeError as e:
+                    # Fallback: try with path (older API)
+                    try:
+                        asgi_app = mcp.streamable_http_app(path=mcp_path)
+                        logger.info(f"Streamable HTTP app created with path: {mcp_path}")
+                    except TypeError:
+                        # Last resort: no arguments
+                        asgi_app = mcp.streamable_http_app()
+                        logger.info("Streamable HTTP app created (no arguments) - endpoint will be at /mcp")
+            except Exception as e:
                 logger.warning(f"streamable_http_app() failed: {e}")
         
         # Method 2: Try http_app() (some MCP versions)
@@ -755,12 +813,29 @@ def main():
         
         # Start the server
         if asgi_app is not None:
+            # Apply DebugMiddleware to log all incoming requests
+            logger.info("Applying DebugMiddleware for request logging")
+            asgi_app = DebugMiddleware(asgi_app)
+            
             # Apply HostOverrideMiddleware if we're binding to 0.0.0.0 (Docker/remote scenario)
             # This bypasses DNS rebinding protection by rewriting Host header to localhost
             if mcp_host == "0.0.0.0":
                 target_host = f"127.0.0.1:{mcp_port}"
                 logger.info(f"Applying HostOverrideMiddleware: rewriting Host headers to {target_host}")
                 asgi_app = HostOverrideMiddleware(asgi_app, target_host=target_host)
+            
+            # Log helpful debugging info about MCP paths
+            logger.info("=" * 60)
+            logger.info("MCP SERVER CONFIGURATION:")
+            logger.info(f"  Host: {mcp_host}")
+            logger.info(f"  Port: {mcp_port}")
+            logger.info(f"  Path: {mcp_path}")
+            logger.info(f"  Full URL: {mcp_url}")
+            logger.info("MCP PROTOCOL INFO:")
+            logger.info("  - POST /mcp → Send JSON-RPC messages")
+            logger.info("  - GET /mcp → SSE stream (requires Accept: text/event-stream)")
+            logger.info("  - GET /mcp is NOT supported for simple HTTP clients")
+            logger.info("=" * 60)
             
             logger.info(f"🚀 Starting uvicorn server on {mcp_host}:{mcp_port}")
             logger.info(f"📡 MCP Streamable HTTP endpoint ready at: {mcp_url}")

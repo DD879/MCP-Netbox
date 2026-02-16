@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 @mcp_tool(category="dcim")
 def netbox_create_device(
     client: NetBoxClient,
-    name: str,
     device_type: str,
     site: str,
     role: str,
+    name: Optional[str] = None,
+    device_name: Optional[str] = None,
     status: str = "active",
     rack: Optional[str] = None,
     position: Optional[int] = None,
@@ -36,7 +37,8 @@ def netbox_create_device(
     
     Args:
         client: NetBoxClient instance (injected)
-        name: Device name (hostname)
+        name: Device name (hostname). Alias: device_name
+        device_name: Alias for name (either one can be used)
         device_type: Device type model or slug
         site: Site name or slug
         role: Device role name or slug
@@ -56,10 +58,13 @@ def netbox_create_device(
         netbox_create_device("rtr-01", "isr4331", "amsterdam-dc", "router", confirm=True)
     """
     try:
+        # Accept both 'name' and 'device_name' for flexibility
+        name = name or device_name
+        
         if not name or not device_type or not site or not role:
             return {
                 "success": False,
-                "error": "Device name, type, site, and role are required",
+                "error": "Device name (name or device_name), device_type, site, and role are required",
                 "error_type": "ValidationError"
             }
         

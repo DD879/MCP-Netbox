@@ -24,7 +24,9 @@ services:
 
   # NetBox MCP Server (main application)
   netbox-mcp:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: netbox-mcp-server
     restart: unless-stopped
     depends_on:
@@ -59,7 +61,9 @@ services:
 
   # RQ Worker for background task processing
   netbox-sync-worker:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: netbox-mcp-worker
     restart: unless-stopped
     command: ["python", "-m", "netbox_mcp.worker"]
@@ -125,7 +129,7 @@ networks:
 #
 # Usage:
 # 1. Copy .env.example to .env and configure NetBox credentials
-# 2. Start all services: docker-compose -f docker-compose.async.yml up -d
-# 3. Start with monitoring: docker-compose -f docker-compose.async.yml --profile monitoring up -d
-# 4. View logs: docker-compose -f docker-compose.async.yml logs -f
-# 5. Scale workers: docker-compose -f docker-compose.async.yml up -d --scale netbox-sync-worker=3
+# 2. Start all services: docker-compose -f docker/docker-compose.async.yml up -d
+# 3. Start with monitoring: docker-compose -f docker/docker-compose.async.yml --profile monitoring up -d
+# 4. View logs: docker-compose -f docker/docker-compose.async.yml logs -f
+# 5. Scale workers: docker-compose -f docker/docker-compose.async.yml up -d --scale netbox-sync-worker=3

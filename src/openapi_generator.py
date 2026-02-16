@@ -16,9 +16,9 @@ from dataclasses import dataclass, field
 import inspect
 import re
 
-from netbox_mcp.registry import TOOL_REGISTRY, list_tools
-from netbox_mcp.exceptions import NetBoxError
-from netbox_mcp._version import get_cached_version
+from src.registry import TOOL_REGISTRY, list_tools
+from src.exceptions import NetBoxError
+from src._version import get_cached_version
 
 logger = logging.getLogger(__name__)
 

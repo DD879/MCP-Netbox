@@ -1,6 +1,8 @@
 services:
   netbox-mcp:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     image: netbox-mcp-server:latest
     container_name: netbox-mcp-server
     

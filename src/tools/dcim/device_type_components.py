@@ -17,9 +17,9 @@ Component templates supported:
 - Module Bay Templates: Modular component bays (line cards)
 """
 
-from netbox_mcp.registry import mcp_tool
-from netbox_mcp.client import NetBoxClient
-from netbox_mcp.exceptions import (
+from src.registry import mcp_tool
+from src.client import NetBoxClient
+from src.exceptions import (
     NetBoxValidationError as ValidationError, 
     NetBoxNotFoundError as NotFoundError, 
     NetBoxConflictError as ConflictError

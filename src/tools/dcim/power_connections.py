@@ -9,9 +9,9 @@ including cable connections between power outlets, devices, and power feeds.
 from typing import Dict, Any, Optional, List
 import logging
 
-from netbox_mcp.registry import mcp_tool
-from netbox_mcp.client import NetBoxClient
-from netbox_mcp.exceptions import NetBoxValidationError, NetBoxNotFoundError, NetBoxConflictError
+from src.registry import mcp_tool
+from src.client import NetBoxClient
+from src.exceptions import NetBoxValidationError, NetBoxNotFoundError, NetBoxConflictError
 
 logger = logging.getLogger(__name__)
 

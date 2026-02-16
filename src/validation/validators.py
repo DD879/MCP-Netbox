@@ -7,7 +7,7 @@ across NetBox MCP tools, ensuring consistent validation behavior.
 """
 
 from typing import List, Optional
-from netbox_mcp.exceptions import NetBoxValidationError
+from src.exceptions import NetBoxValidationError
 
 
 class CableValidator:

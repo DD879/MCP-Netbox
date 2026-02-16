@@ -22,7 +22,7 @@ services:
     networks:
       - netbox-mcp
 
-  # NetBox MCP Server (main application)
+  # NetBox MCP Server  (main application)
   netbox-mcp:
     build:
       context: ..
